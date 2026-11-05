@@ -35,6 +35,7 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -254,6 +255,9 @@ func main() {
 	flExechookBackoff := pflag.Duration("exechook-backoff",
 		envDuration(3*time.Second, "GITSYNC_EXECHOOK_BACKOFF", "GIT_SYNC_EXECHOOK_BACKOFF"),
 		"the time to wait before retrying a failed exechook")
+	flExechookPaths := pflag.StringArray("exechook-path",
+		envStringArray("", "GITSYNC_EXECHOOK_PATH"),
+		"run the exechook only for hashes that change this git pathspec (may be specified more than once)")
 
 	flPrePubExechookCommand := pflag.String("pre-publish-exechook-command",
 		envString("", "GITSYNC_PRE_PUBLISH_EXECHOOK_COMMAND"),
@@ -952,6 +956,14 @@ func main() {
 			log,
 			*flOneTime,
 		)
+		if paths := slices.DeleteFunc(*flExechookPaths, func(p string) bool { return p == "" }); len(paths) > 0 {
+			exechookRunner.OnlyIf(func(ctx context.Context, from, to string) bool {
+				// Exit 0: no difference.  Anything else, including errors
+				// (e.g. `from` gone after a force-push): run the hook.
+				_, _, err := git.Run(ctx, git.root, append([]string{"diff", "--quiet", from, to, "--"}, paths...)...)
+				return err != nil
+			})
+		}
 		go exechookRunner.Run(context.Background())
 	}
 
@@ -2674,6 +2686,14 @@ OPTIONS
             be invoked more than one time per hash, so they must be idempotent.
             This flag obsoletes --sync-hook-command, but if sync-hook-command
             is specified, it will take precedence.
+
+    --exechook-path <string>, $GITSYNC_EXECHOOK_PATH
+            Run the --exechook-command only for hashes that change this git
+            pathspec (e.g. 'config/' or ':(glob)**/*.yaml') since the last
+            hash it succeeded on; other hashes are skipped.  The first hash
+            after startup always runs.  This flag may be specified more than
+            once, and the environment variable will be parsed like PATH -
+            using a colon (':') to separate elements.
 
     --exechook-timeout <duration>, $GITSYNC_EXECHOOK_TIMEOUT
             The timeout for the --exechook-command.  If not specified, this

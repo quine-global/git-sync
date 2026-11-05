@@ -17,8 +17,12 @@ limitations under the License.
 package hook
 
 import (
+	"context"
 	"fmt"
 	"testing"
+	"time"
+
+	"k8s.io/git-sync/pkg/logging"
 )
 
 const (
@@ -77,4 +81,53 @@ func TestHookData(t *testing.T) {
 			t.Fatalf("expected hash %s but got %s", hash1, hash)
 		}
 	})
+}
+
+type recordingHook struct{ ran chan string }
+
+func (h recordingHook) Name() string { return "recording" }
+func (h recordingHook) Do(_ context.Context, hash string) error {
+	h.ran <- hash
+	return nil
+}
+
+func TestHookRunnerOnlyIf(t *testing.T) {
+	hash3 := "3333333333333333333333333333333333333333"
+	h := recordingHook{ran: make(chan string, 3)}
+	asked := make(chan [2]string, 3)
+	r := NewHookRunner(h, time.Millisecond, NewHookData(), logging.New("", "", 0), false)
+	r.OnlyIf(func(_ context.Context, from, to string) bool {
+		asked <- [2]string{from, to}
+		return to == hash3
+	})
+	go r.Run(context.Background())
+
+	wait := func(ch any) any {
+		select {
+		case v := <-ch.(chan string):
+			return v
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out")
+		}
+		return nil
+	}
+
+	// The first hash runs without asking.
+	r.Send(hash1)
+	if got := wait(h.ran); got != hash1 {
+		t.Fatalf("ran %v, want %s", got, hash1)
+	}
+	// hash2 changes nothing watched: skipped.
+	r.Send(hash2)
+	if got := <-asked; got != [2]string{hash1, hash2} {
+		t.Fatalf("asked %v", got)
+	}
+	// hash3 does, and is compared with hash2, the skipped one.
+	r.Send(hash3)
+	if got := <-asked; got != [2]string{hash2, hash3} {
+		t.Fatalf("asked %v", got)
+	}
+	if got := wait(h.ran); got != hash3 {
+		t.Fatalf("ran %v, want %s", got, hash3)
+	}
 }

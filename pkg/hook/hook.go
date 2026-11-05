@@ -110,6 +110,15 @@ type HookRunner struct {
 	// Used to send a status result when running in one-time mode.
 	// Should be initialised to a buffered channel of size 1.
 	oneTimeResult chan bool
+	// If set, the hook is skipped for a hash when this says nothing it cares
+	// about changed since the last hash it succeeded on.
+	changed func(ctx context.Context, from, to string) bool
+}
+
+// OnlyIf makes the runner skip hashes for which changed(lastSuccess, hash)
+// is false.  The first hash after startup always runs.
+func (r *HookRunner) OnlyIf(changed func(ctx context.Context, from, to string) bool) {
+	r.changed = changed
 }
 
 // Just the logr methods we need in this package.
@@ -137,6 +146,11 @@ func (r *HookRunner) Run(ctx context.Context) {
 			// every single hash.
 			hash := r.data.get()
 			if hash == lastHash {
+				break
+			}
+			if r.changed != nil && lastHash != "" && !r.changed(ctx, lastHash, hash) {
+				r.log.V(0).Info("skipping hook: nothing it watches changed", "hash", hash, "since", lastHash)
+				lastHash = hash
 				break
 			}
 

@@ -293,6 +293,14 @@ OPTIONS
             must be idempotent.  This flag obsoletes --sync-hook-command, but
             if sync-hook-command is specified, it will take precedence.
 
+    --exechook-path <string>, $GITSYNC_EXECHOOK_PATH
+            Run the --exechook-command only for hashes that change this git
+            pathspec (e.g. 'config/' or ':(glob)**/*.yaml') since the last
+            hash it succeeded on; other hashes are skipped.  The first hash
+            after startup always runs.  This flag may be specified more than
+            once, and the environment variable will be parsed like PATH -
+            using a colon (':') to separate elements.
+
     --exechook-timeout <duration>, $GITSYNC_EXECHOOK_TIMEOUT
             The timeout for the --exechook-command.  If not specified, this
             defaults to 30 seconds ("30s").
